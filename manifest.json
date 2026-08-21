@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "id": "arch.iudc",
+  "name": "Pacman",
+  "version": "1.0.0",
+  "author": "m4teoarg",
+  "license": "MIT",
+  "description": "Package manager in the Omarchy bar: pacman + AUR update notifier, package search, install/remove, integrated transaction console and cache cleaner.",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Pacman",
+    "description": "Pacman/AUR updates notifier with package search, install/remove actions, live transaction console and cache cleaning.",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "refreshIntervalSec": 1800,
+      "includeAur": true,
+      "cacheKeepVersions": 2
+    },
+    "schema": [
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Refresh interval (seconds)",
+        "min": 300,
+        "max": 21600,
+        "step": 60,
+        "defaultValue": 1800
+      },
+      {
+        "key": "includeAur",
+        "type": "boolean",
+        "label": "Include AUR updates",
+        "defaultValue": true
+      },
+      {
+        "key": "cacheKeepVersions",
+        "type": "integer",
+        "label": "Cache versions to keep",
+        "min": 1,
+        "max": 5,
+        "step": 1,
+        "defaultValue": 2
+      }
+    ]
+  }
+}

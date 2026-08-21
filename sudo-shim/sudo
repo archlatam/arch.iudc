@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# arch.iudc — sudo shim. Intercepts `sudo` invocations made by AUR helpers so
+# the password comes from a graphical askpass dialog instead of a terminal.
+exec /usr/bin/sudo -A "$@"
