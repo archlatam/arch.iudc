@@ -29,7 +29,7 @@ All colors follow your active Omarchy theme tokens.
 ## Installation
 
 ```sh
-omarchy plugin add https://github.com/archlatam/arch-iudc.git --enable
+omarchy plugin add https://github.com/archlatam/arch.iudc.git --enable
 ```
 
 Then add the widget from the shell config if it is not enabled automatically (bar section `right` by default).
