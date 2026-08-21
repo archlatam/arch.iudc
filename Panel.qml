@@ -325,6 +325,7 @@ Panel {
       radius: 7
       color: root.repoCount > 0 ? root.urgentC : root.accentC
       Text {
+        textFormat: Text.PlainText
         anchors.centerIn: parent
         text: root.totalUpdates > 99 ? "99+" : root.totalUpdates
         color: root.bar ? root.bar.background : Color.background
@@ -383,6 +384,7 @@ Panel {
           implicitHeight: Math.max(headerIcon.implicitHeight, headerLabels.implicitHeight, headerActions.implicitHeight)
 
           Text {
+            textFormat: Text.PlainText
             id: headerIcon
             text: root.iconText
             color: root.iconColor
@@ -402,6 +404,7 @@ Panel {
             anchors.verticalCenter: parent.verticalCenter
 
             Text {
+              textFormat: Text.PlainText
               text: "Pacman"
               color: root.fg
               font.family: root.bar.fontFamily
@@ -409,6 +412,7 @@ Panel {
               font.bold: true
             }
             Text {
+              textFormat: Text.PlainText
               text: root.statusPhrase
               visible: text !== ""
               color: root.dimColor
@@ -485,6 +489,7 @@ Panel {
             spacing: Style.space(8)
 
             Text {
+              textFormat: Text.PlainText
               text: root.checking
                 ? "Checking for updates\u2026"
                 : (root.totalUpdates > 0 ? root.statusPhrase : "Everything is up to date")
@@ -516,6 +521,7 @@ Panel {
           }
 
           Text {
+            textFormat: Text.PlainText
             visible: !root.checking && root.totalUpdates === 0
             text: "\uf058  No pending updates"
             color: root.okColor
@@ -558,6 +564,7 @@ Panel {
           }
 
           Text {
+            textFormat: Text.PlainText
             visible: root.searchResults.length > 0
             text: root.searchResults.length + " result(s)"
             color: root.dimColor
@@ -566,6 +573,7 @@ Panel {
           }
 
           Text {
+            textFormat: Text.PlainText
             visible: root.searchResults.length === 0 && !root.searching && searchField.text.trim() !== ""
             text: "No results"
             color: root.dimColor
@@ -586,6 +594,7 @@ Panel {
           spacing: Style.space(8)
 
           Text {
+            textFormat: Text.PlainText
             text: root.loadingInstalled
               ? "Loading\u2026"
               : root.installedCount + " packages (" + root.nativePkgs.length + " native \u00b7 " + root.foreignPkgs.length + " foreign/AUR)"
@@ -615,6 +624,7 @@ Panel {
           }
 
           Text {
+            textFormat: Text.PlainText
             visible: root.installedCount > 200 && installedFilter.text.trim() === ""
             text: "+ more (use the filter)"
             color: root.dimColor
@@ -630,6 +640,7 @@ Panel {
           spacing: Style.space(10)
 
           Text {
+            textFormat: Text.PlainText
             text: "Cache maintenance"
             color: root.fg
             font.family: root.bar.fontFamily
@@ -638,6 +649,7 @@ Panel {
           }
 
           Text {
+            textFormat: Text.PlainText
             width: parent.width
             text: root.cacheInfo.length > 0 ? root.cacheInfo.join("\n") : "Cache info unavailable"
             color: root.dimColor
@@ -696,6 +708,7 @@ Panel {
               anchors.verticalCenter: parent.verticalCenter
 
               Text {
+                textFormat: Text.PlainText
                 text: "\uf105"
                 color: root.accentC
                 font.family: root.bar.fontFamily
@@ -703,6 +716,7 @@ Panel {
                 anchors.verticalCenter: parent.verticalCenter
               }
               Text {
+                textFormat: Text.PlainText
                 text: root.selectedPkg
                 color: root.fg
                 font.family: root.bar.fontFamily
@@ -718,6 +732,7 @@ Panel {
                 color: Style.hoverFillFor(root.fg, root.accentC)
                 anchors.verticalCenter: parent.verticalCenter
                 Text {
+                  textFormat: Text.PlainText
                   id: stateTag
                   anchors.centerIn: parent
                   text: "installed"
@@ -775,6 +790,7 @@ Panel {
           }
 
           Text {
+            textFormat: Text.PlainText
             visible: root.loadingInfo
             text: "Loading package info\u2026"
             color: root.dimColor
@@ -793,6 +809,7 @@ Panel {
               spacing: Style.space(8)
 
               Text {
+                textFormat: Text.PlainText
                 text: modelData.key
                 color: root.dimColor
                 font.family: root.bar.fontFamily
@@ -801,6 +818,7 @@ Panel {
                 Layout.preferredWidth: Style.space(96)
               }
               Text {
+                textFormat: Text.PlainText
                 text: modelData.value === "" ? "-" : modelData.value
                 color: root.fg
                 font.family: root.bar.fontFamily
@@ -858,6 +876,7 @@ Panel {
                   : (root.txExitCode === 0 ? root.okColor : (root.txExitCode < 0 ? root.dimColor : root.urgentC))
               }
               Text {
+                textFormat: Text.PlainText
                 text: root.txLabel !== "" ? root.txLabel : "Transaction"
                 color: root.fg
                 font.family: root.bar.fontFamily
@@ -868,6 +887,7 @@ Panel {
                 anchors.verticalCenter: parent.verticalCenter
               }
               Text {
+                textFormat: Text.PlainText
                 text: root.txRunning ? "running\u2026"
                   : (root.txExitCode === 0 ? "Finished OK" : (root.txExitCode < 0 ? "" : "Failed (exit " + root.txExitCode + ")"))
                 color: root.txRunning ? root.okColor
@@ -919,6 +939,7 @@ Panel {
           }
 
           Text {
+            textFormat: Text.PlainText
             visible: root.txRunning && root.consoleLines.length === 0
             text: "Waiting for output\u2026"
             color: root.dimColor
@@ -949,6 +970,7 @@ Panel {
               }
 
               Text {
+                textFormat: Text.PlainText
                 id: consoleText
                 width: consoleScroll.width
                 text: root.consoleLines.join("\n")
@@ -963,6 +985,7 @@ Panel {
           }
 
           Text {
+            textFormat: Text.PlainText
             text: root.txRunning
               ? "The panel stays here until it finishes \u00b7 output streams live"
               : "Esc or Back to return \u00b7 output kept until you discard it"
@@ -974,6 +997,7 @@ Panel {
 
         // ---------- Footer hints ----------
         Text {
+          textFormat: Text.PlainText
           visible: root.consoleLines.length === 0 && !root.txViewActive
           text: "Esc close \u00b7 r refresh \u00b7 u upgrade \u00b7 1-4 tabs \u00b7 click a package for details"
           color: root.dimColor
@@ -1029,12 +1053,14 @@ Panel {
       spacing: Style.space(8)
 
       Text {
+        textFormat: Text.PlainText
         text: urow.modelData.source === "aur" ? "\uf089a" : "\uf03d3"
         color: urow.modelData.source === "aur" ? root.aurColor : root.accentC
         font.family: root.bar.fontFamily
         font.pixelSize: Style.font.caption
       }
       Text {
+        textFormat: Text.PlainText
         text: urow.modelData.name
         color: root.fg
         font.family: root.bar.fontFamily
@@ -1044,6 +1070,7 @@ Panel {
         Layout.preferredWidth: Style.space(150)
       }
       Text {
+        textFormat: Text.PlainText
         text: urow.modelData.old + " \u2192 " + urow.modelData.new
         color: root.dimColor
         font.family: root.bar.fontFamily
@@ -1052,6 +1079,7 @@ Panel {
         Layout.fillWidth: true
       }
       Text {
+        textFormat: Text.PlainText
         text: urow.modelData.source === "aur" ? "AUR" : "repo"
         color: urow.modelData.source === "aur" ? root.aurColor : root.dimColor
         font.family: root.bar.fontFamily
@@ -1092,6 +1120,7 @@ Panel {
         spacing: Style.space(6)
 
         Text {
+          textFormat: Text.PlainText
           text: srow.modelData.name
           color: root.fg
           font.family: root.bar.fontFamily
@@ -1101,6 +1130,7 @@ Panel {
           Layout.fillWidth: true
         }
         Text {
+          textFormat: Text.PlainText
           visible: srow.modelData.version !== ""
           text: srow.modelData.version
           color: root.dimColor
@@ -1108,6 +1138,7 @@ Panel {
           font.pixelSize: Style.font.caption
         }
         Text {
+          textFormat: Text.PlainText
           text: srow.modelData.repo
           color: srow.modelData.aur ? root.aurColor : root.dimColor
           font.family: root.bar.fontFamily
@@ -1115,6 +1146,7 @@ Panel {
         }
       }
       Text {
+        textFormat: Text.PlainText
         visible: srow.modelData.description !== ""
         width: parent.width
         text: srow.modelData.description
@@ -1170,6 +1202,7 @@ Panel {
       spacing: Style.space(8)
 
       Text {
+        textFormat: Text.PlainText
         text: irow.modelData.name
         color: root.fg
         font.family: root.bar.fontFamily
@@ -1178,12 +1211,14 @@ Panel {
         Layout.fillWidth: true
       }
       Text {
+        textFormat: Text.PlainText
         text: irow.modelData.version
         color: root.dimColor
         font.family: root.bar.fontFamily
         font.pixelSize: Style.font.caption
       }
       Text {
+        textFormat: Text.PlainText
         visible: irow.modelData.aur
         text: "AUR"
         color: root.aurColor
