@@ -39,6 +39,7 @@ Panel {
   property var infoPairs: []
   property var infoMap: ({})
   property var consoleLines: []
+  property var pendingConsole: []
   property string txLabel: ""
   property bool checking: false
   property bool searching: false
@@ -51,6 +52,7 @@ Panel {
   property bool txViewActive: false
   property string prevTab: "updates"
   property int searchRunId: 0
+  property string lastCompletedQuery: ""
   property var repoList: []
   property bool repoListLoaded: false
 
@@ -84,6 +86,9 @@ Panel {
     return parts.join(" \u00b7 ")
   }
 
+  // Console lines are buffered and flushed in batches: rebuilding the joined
+  // Text once per output line caused full re-layouts hundreds of times per
+  // transaction, which froze the panel during verbose installs.
   function appendConsole(line) {
     var raw = String(line || "")
     // Hard per-line ceiling: hostile package/hook output must never balloon
@@ -91,7 +96,15 @@ Panel {
     if (raw.length > 8000) raw = raw.slice(0, 8000) + " \u2026"
     var l = Model.clean(raw)
     if (l === "") return
-    root.consoleLines.push(l)
+    root.pendingConsole.push(l)
+    if (root.pendingConsole.length === 1) consoleFlush.restart()
+  }
+
+  function flushConsole() {
+    if (root.pendingConsole.length === 0) return
+    for (var i = 0; i < root.pendingConsole.length; i++)
+      root.consoleLines.push(root.pendingConsole[i])
+    root.pendingConsole = []
     if (root.consoleLines.length > 500) root.consoleLines.splice(0, root.consoleLines.length - 500)
     root.consoleLinesChanged()
   }
@@ -101,6 +114,8 @@ Panel {
     if (!root.txViewActive) root.prevTab = root.tab
     root.tab = "updates"
     root.txLabel = label
+    consoleFlush.stop()
+    root.pendingConsole = []
     root.consoleLines = [">>> " + label]
     root.txRunning = true
     root.txCancelling = false
@@ -176,13 +191,14 @@ Panel {
   function doSearch() {
     var q = searchField.text.trim()
     if (q === "") return
+    if (!root.searching && q === root.lastCompletedQuery) return
     root.searchRunId++
     searchProc.runId = root.searchRunId
     if (searchProc.running) searchProc.running = false
     root.searching = true
     root.searchResults = []
     searchProc.lastQuery = q
-    searchProc.command = ["bash", "-c", root.pluginDir + "/iudc-search.sh " + Util.shellQuote(q)]
+    searchProc.command = [root.pluginDir + "/iudc-search.sh", q]
     searchProc.running = true
   }
 
@@ -264,7 +280,8 @@ Panel {
       onFinished: {
         if (searchProc.runId !== root.searchRunId) return
         var res = Model.parseSearch(searchOut.text)
-        root.searchResults = Model.rankSearch(res.repo, res.aur, searchProc.lastQuery).slice(0, 60)
+        root.searchResults = Model.rankSearch(res.repo, res.aur, searchProc.lastQuery)
+        root.lastCompletedQuery = searchProc.lastQuery
         root.searching = false
       }
     }
@@ -346,6 +363,7 @@ Panel {
       }
       root.refresh()
       root.loadInstalled()
+      root.flushConsole()
       if (!wasCancelling && exitCode === 0) {
         var rs = root.searchResults.slice()
         for (var i = 0; i < rs.length; i++)
@@ -373,8 +391,16 @@ Panel {
 
   Timer {
     id: searchDebounce
-    interval: 350
+    interval: 250
     onTriggered: root.doSearch()
+  }
+
+  // Batches console output into ~8 UI updates per second instead of one
+  // full Text rebuild per streamed line.
+  Timer {
+    id: consoleFlush
+    interval: 120
+    onTriggered: root.flushConsole()
   }
 
   // --- bar button --------------------------------------------------------------------
@@ -631,13 +657,14 @@ Panel {
               onAccepted: root.doSearch()
               onTextChanged: {
                 var t = searchField.text.trim()
-                if (t.length >= 2) {
+                if (t !== "") {
                   searchDebounce.restart()
                 } else {
                   searchDebounce.stop()
                   root.searchRunId++
                   if (searchProc.running) searchProc.running = false
                   root.searchResults = []
+                  root.lastCompletedQuery = ""
                   root.searching = false
                 }
               }
@@ -658,8 +685,7 @@ Panel {
           Text {
             textFormat: Text.PlainText
             visible: searchField.text.trim() === "" && root.repoList.length > 0
-            text: root.repoList.length + " official packages \u00b7 first "
-              + Math.min(200, root.repoList.length) + " (a\u2013z)"
+            text: root.repoList.length + " official packages (a\u2013z)"
             color: root.dimColor
             font.family: root.bar.fontFamily
             font.pixelSize: Style.font.caption
@@ -692,9 +718,20 @@ Panel {
             font.pixelSize: Style.font.bodySmall
           }
 
-          Repeater {
-            model: searchField.text.trim() === "" ? root.repoList.slice(0, 200) : root.searchResults
+          // Virtualized: only rows near the viewport are instantiated, so the
+          // full index (~13k) or an unrestricted result set never blocks the
+          // UI thread. Short lists grow to fit; long ones scroll in place.
+          ListView {
+            id: searchList
+            width: parent.width
+            height: Math.min(contentHeight, Style.space(420))
+            interactive: contentHeight > height
+            clip: true
+            spacing: Style.space(8)
+            boundsBehavior: Flickable.StopAtBounds
+            model: searchField.text.trim() === "" ? root.repoList : root.searchResults
             delegate: SearchRow {}
+            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
           }
         }
 
@@ -724,23 +761,21 @@ Panel {
             verticalPadding: Style.space(5)
           }
 
-          Repeater {
+          ListView {
+            width: parent.width
+            height: Math.min(contentHeight, Style.space(420))
+            interactive: contentHeight > height
+            clip: true
+            spacing: Style.space(8)
+            boundsBehavior: Flickable.StopAtBounds
             model: {
               var all = root.nativePkgs.concat(root.foreignPkgs)
               var f = installedFilter.text.trim()
               if (f !== "") all = all.filter(function(p) { return p.name.indexOf(f) >= 0 })
-              return all.slice(0, 200)
+              return all
             }
             delegate: InstalledRow {}
-          }
-
-          Text {
-            textFormat: Text.PlainText
-            visible: root.installedCount > 200 && installedFilter.text.trim() === ""
-            text: "+ more (use the filter)"
-            color: root.dimColor
-            font.family: root.bar.fontFamily
-            font.pixelSize: Style.font.caption
+            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
           }
         }
 
@@ -1363,7 +1398,7 @@ Panel {
   // the same parser instance across runs of one Process.
   component BoundedCollector: SplitParser {
     id: bcol
-    property int maxChars: 2 * 1024 * 1024
+    property int maxChars: 8 * 1024 * 1024
     property bool done: false
     property string text: ""
     property bool truncated: false

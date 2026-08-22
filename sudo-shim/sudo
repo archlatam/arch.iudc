@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # arch.iudc — sudo shim. Intercepts `sudo` invocations made by AUR helpers so
-# the password comes from a graphical askpass dialog instead of a terminal.
+# the final privileged step is authorized through pkexec/polkit instead of a
+# terminal password prompt.
 #
-# Only `sudo pacman ...` is escalated silently via askpass — that's the one
-# call yay makes internally to install the built package / repo deps. Any
-# other sudo invocation (e.g. one hidden inside a PKGBUILD's prepare/build/
-# package functions) falls through to the real, unmodified sudo, which
-# prompts on the controlling terminal instead of a blank-check GUI dialog.
+# Only `sudo pacman ...` is escalated — that's the one call yay makes
+# internally to install the built package / repo deps. Any other sudo
+# invocation (e.g. one hidden inside a PKGBUILD's prepare/build/package
+# functions) falls through to the real, unmodified sudo, which prompts on the
+# controlling terminal instead of a blank-check escalation.
 case "$1" in
   pacman|/usr/bin/pacman)
-    export IUDC_SUDO_CMD="$*"
-    exec /usr/bin/sudo -A "$@"
+    exec pkexec "$@"
     ;;
   *)
     exec /usr/bin/sudo "$@"

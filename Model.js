@@ -100,7 +100,9 @@ function rankSearch(repoArr, aurArr, query) {
     var sa = score(a)
     var sb = score(b)
     if (sa !== sb) return sa - sb
-    return a.name.localeCompare(b.name)
+    // Byte-wise compare: much cheaper than localeCompare on big result sets
+    // and equivalent for package names (ASCII).
+    return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0)
   }
   return repoArr.concat(aurArr).sort(cmp)
 }
@@ -126,7 +128,8 @@ function parseRepoList(text) {
       description: ""
     })
   }
-  out.sort(function(a, b) { return a.name.localeCompare(b.name) })
+  // Byte-wise sort: localeCompare costs several times more across ~13k rows.
+  out.sort(function(a, b) { return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0) })
   return out
 }
 

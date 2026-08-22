@@ -5,9 +5,9 @@
 # Usage: iudc-run.sh <mode> [args]
 #   sync                    refresh databases            (pkexec pacman -Sy)
 #   upgrade [aur]           full system upgrade          (pkexec pacman -Syu)
-#                           + AUR remainder when "aur"   (yay -Sua, sudo via askpass)
+#                           + AUR remainder when "aur"   (yay -Sua, sudo via pkexec)
 #   install-repo <pkg>      install from official repos  (pkexec pacman -S)
-#   install-aur <pkg>       install/build from AUR       (yay -S, sudo via askpass)
+#   install-aur <pkg>       install/build from AUR       (yay -S, sudo via pkexec)
 #   remove <pkg>            uninstall package            (pkexec pacman -Rns)
 #   clean-paccache <keep>   prune pacman cache versions  (pkexec paccache -rk)
 #   clean-aurcache          wipe yay/AUR build cache     (user-level rm)
@@ -41,11 +41,9 @@ run() {
   exit $rc
 }
 
-# Route yay's internal `sudo` calls through `sudo -A` so the password prompt is
-# answered by the graphical askpass helper instead of requiring a terminal.
-use_askpass_sudo() {
-  export SUDO_ASKPASS="$DIR/askpass.sh"
-  [[ -x $SUDO_ASKPASS ]] || fail "askpass.sh missing or not executable"
+# Route yay's internal `sudo` calls through the shim so the final privileged
+# step is authorized via pkexec/polkit (same agent as the repo operations).
+use_pkexec_sudo() {
   export PATH="$DIR/sudo-shim:$PATH"
 }
 
@@ -60,7 +58,7 @@ case "$mode" in
     if [[ ${2:-} == aur ]]; then
       echo ""
       echo ">>> Upgrading AUR packages…"
-      use_askpass_sudo
+      use_pkexec_sudo
       run yay -Sua --color=never --noconfirm
     fi
     exit 0
@@ -73,7 +71,7 @@ case "$mode" in
   install-aur)
     [[ -n $arg ]] || fail "missing package name"
     echo ">>> Installing AUR package: $arg"
-    use_askpass_sudo
+    use_pkexec_sudo
     run yay -S --color=never --noconfirm --needed "$arg"
     ;;
   remove)
