@@ -4,6 +4,12 @@ A package manager living in the Omarchy bar: pacman + AUR update notifier, packa
 
 ![Pacman plugin preview](preview.png)
 
+![AUR updates](aur.png)
+
+![Search tab](search.png)
+
+![Cache tab](cache.png)
+
 ## Features
 
 - **Bar widget** — ghost icon with an update-count badge; icon turns urgent-colored when repo updates are pending (accent color when only AUR updates remain). Click to open the panel.
