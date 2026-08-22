@@ -110,7 +110,9 @@ Panel {
   function syncDbs() { root.startTx("Syncing databases (pacman -Sy)", "sync") }
 
   function upgradeAll() {
-    root.startTx("Full system upgrade" + (root.includeAur ? " + AUR" : ""), "upgrade", root.includeAur ? "aur" : "")
+    // Hand the upgrade to Omarchy's official updater in a floating terminal:
+    // it prompts for sudo, snapshots, migrates and covers AUR + orphans.
+    if (root.bar) root.bar.run("omarchy-launch-floating-terminal-with-presentation omarchy-update")
   }
 
   function installPkg(name, source) {
@@ -567,7 +569,7 @@ Panel {
             Button {
               text: root.totalUpdates > 0 ? "Upgrade all" : "Refresh"
               tooltipText: root.totalUpdates > 0
-                ? "pacman -Syu --noconfirm" + (root.includeAur ? " then yay -Sua --noconfirm" : "")
+                ? "Runs omarchy update in a terminal"
                 : "Check again"
               fontSize: Style.font.bodySmall
               foreground: root.fg
