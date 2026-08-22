@@ -67,7 +67,7 @@ omarchy-shell arch.iudc close     # close
 This plugin performs two kinds of privileged actions, deliberately split:
 
 - **Repository operations** (`pacman -Syu`, installs, removals, `paccache`) are launched with `pkexec pacman …` / `pkexec paccache …`. Polkit prompts for your password using your desktop's standard authentication agent; no password is ever read, stored or transmitted by this plugin.
-- **AUR operations** must run as your regular user (never as root), so `yay` is executed unprivileged. Because yay internally calls `sudo` for the final install step, the plugin ships a tiny PATH shim that redirects those calls to `sudo -A` with a `SUDO_ASKPASS` helper backed by a `zenity` password dialog. The shim adds no arguments of its own and forwards everything verbatim.
+- **AUR operations** must run as your regular user (never as root), so `yay` is executed unprivileged. Because yay internally calls `sudo` for the final install step, the plugin ships a tiny PATH shim that intercepts those calls: only `sudo pacman …` is escalated silently via `sudo -A` with a `SUDO_ASKPASS` helper backed by a `zenity` password dialog, which displays the exact command being authorized. Any other `sudo` invocation — e.g. one hidden inside a PKGBUILD's prepare/build/package functions — falls through to the real, unmodified sudo, which prompts on the controlling terminal instead of a blank-check GUI dialog. The shim adds no arguments of its own and forwards everything verbatim.
 
 Nothing is downloaded or executed from third-party URLs; all commands operate exclusively on your configured pacman repositories and the AUR.
 

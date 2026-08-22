@@ -53,7 +53,7 @@ Panel {
   // --- derived ------------------------------------------------------------------
   readonly property int repoCount: {
     var n = 0
-    for (var i = 0; i < root.updates.length; i++) if (root.updates[i].source === "repo") n++
+    for (var i = 0; i < root.updates.length; i++) if (root.updates[i].source === "Package") n++
     return n
   }
   readonly property int aurCount: root.updates.length - root.repoCount
@@ -75,8 +75,8 @@ Panel {
     if (!root.haveChecked) return "Not checked yet"
     if (root.totalUpdates === 0) return "System up to date"
     var parts = []
-    if (root.repoCount > 0) parts.push(root.repoCount + " repo update" + (root.repoCount === 1 ? "" : "s"))
-    if (root.aurCount > 0) parts.push(root.aurCount + " AUR update" + (root.aurCount === 1 ? "" : "s"))
+    if (root.repoCount > 0) parts.push(root.repoCount + " package update" + (root.repoCount === 1 ? "" : "s"))
+    if (root.aurCount > 0) parts.push(root.aurCount + " package update" + (root.aurCount === 1 ? "" : "s"))
     return parts.join(" \u00b7 ")
   }
 
@@ -405,7 +405,7 @@ Panel {
 
             Text {
               textFormat: Text.PlainText
-              text: "Pacman"
+              text: "Package Manager"
               color: root.fg
               font.family: root.bar.fontFamily
               font.pixelSize: Style.font.title
@@ -1080,7 +1080,7 @@ Panel {
       }
       Text {
         textFormat: Text.PlainText
-        text: urow.modelData.source === "aur" ? "AUR" : "repo"
+        text: urow.modelData.source === "aur" ? "AUR" : "package"
         color: urow.modelData.source === "aur" ? root.aurColor : root.dimColor
         font.family: root.bar.fontFamily
         font.pixelSize: Style.font.caption * 0.85
