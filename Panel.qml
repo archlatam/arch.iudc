@@ -49,11 +49,12 @@ Panel {
   property bool haveChecked: false
   property bool txViewActive: false
   property string prevTab: "updates"
+  property int searchRunId: 0
 
   // --- derived ------------------------------------------------------------------
   readonly property int repoCount: {
     var n = 0
-    for (var i = 0; i < root.updates.length; i++) if (root.updates[i].source === "Package") n++
+    for (var i = 0; i < root.updates.length; i++) if (root.updates[i].source === "repo") n++
     return n
   }
   readonly property int aurCount: root.updates.length - root.repoCount
@@ -149,8 +150,12 @@ Panel {
   function doSearch() {
     var q = searchField.text.trim()
     if (q === "") return
+    root.searchRunId++
+    searchProc.runId = root.searchRunId
+    if (searchProc.running) searchProc.running = false
     root.searching = true
     root.searchResults = []
+    searchProc.lastQuery = q
     searchProc.command = ["bash", "-c", root.pluginDir + "/iudc-search.sh " + Util.shellQuote(q)]
     searchProc.running = true
   }
@@ -223,16 +228,19 @@ Panel {
 
   Process {
     id: searchProc
+    property int runId: 0
+    property string lastQuery: ""
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
+        if (searchProc.runId !== root.searchRunId) return
         var res = Model.parseSearch(text)
-        root.searchResults = res.repo.concat(res.aur).slice(0, 60)
+        root.searchResults = Model.rankSearch(res.repo, res.aur, searchProc.lastQuery).slice(0, 60)
         root.searching = false
       }
     }
     stderr: StdioCollector { waitForEnd: true }
-    onExited: function() { root.searching = false }
+    onExited: if (searchProc.runId === root.searchRunId) root.searching = false
   }
 
   Process {
@@ -295,6 +303,12 @@ Panel {
     repeat: true
     triggeredOnStart: true
     onTriggered: root.refresh()
+  }
+
+  Timer {
+    id: searchDebounce
+    interval: 350
+    onTriggered: root.doSearch()
   }
 
   // --- bar button --------------------------------------------------------------------
@@ -549,6 +563,18 @@ Panel {
               font.family: root.bar.fontFamily
               verticalPadding: Style.space(5)
               onAccepted: root.doSearch()
+              onTextChanged: {
+                var t = searchField.text.trim()
+                if (t.length >= 2) {
+                  searchDebounce.restart()
+                } else {
+                  searchDebounce.stop()
+                  root.searchRunId++
+                  if (searchProc.running) searchProc.running = false
+                  root.searchResults = []
+                  root.searching = false
+                }
+              }
             }
 
             Button {

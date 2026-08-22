@@ -8,7 +8,7 @@ A package manager living in the Omarchy bar: pacman + AUR update notifier, packa
 
 - **Bar widget** — ghost icon with an update-count badge; icon turns urgent-colored when repo updates are pending (accent color when only AUR updates remain). Click to open the panel.
 - **Updates tab** — lists pending repository and AUR updates side by side with current → new versions; one-click *Upgrade* runs the full sync in a transaction view.
-- **Search tab** — searches official repos and the AUR at once; shows installed state and lets you install or remove any result.
+- **Search tab** — filters live as you type (official repos + AUR at once); official packages rank first with exact-name matches on top, shows installed state and lets you install or remove any result.
 - **Installed tab** — browse native vs foreign packages with sizes, jump straight to details, remove packages.
 - **Cache tab** — clean the pacman package cache (`paccache`, keeping your chosen number of old versions) and the AUR build cache (`~/.cache/yay`).
 - **Live transaction console** — every privileged operation streams its output into the panel itself (no floating terminal); Esc or *Back* returns to the tabs, a "last operation" pill reopens the log afterwards.

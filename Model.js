@@ -84,6 +84,27 @@ function parseSearch(text) {
   return res
 }
 
+// Ranked merge for search results: official repos first, then relevance
+// (exact name > name prefix > name contains > description only), alphabetical.
+function rankSearch(repoArr, aurArr, query) {
+  var q = String(query || "").toLowerCase()
+  var score = function(e) {
+    var n = e.name.toLowerCase()
+    if (n === q) return 0
+    if (n.indexOf(q) === 0) return 1
+    if (n.indexOf(q) >= 0) return 2
+    return 3
+  }
+  var cmp = function(a, b) {
+    if (a.aur !== b.aur) return a.aur ? 1 : -1
+    var sa = score(a)
+    var sb = score(b)
+    if (sa !== sb) return sa - sb
+    return a.name.localeCompare(b.name)
+  }
+  return repoArr.concat(aurArr).sort(cmp)
+}
+
 // iudc-installed.sh output -> {native:[], foreign:[], cacheInfo:[]}
 function parseInstalled(text) {
   var res = { native: [], foreign: [], cacheInfo: [] }
