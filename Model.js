@@ -105,6 +105,31 @@ function rankSearch(repoArr, aurArr, query) {
   return repoArr.concat(aurArr).sort(cmp)
 }
 
+// iudc-repolist.sh output -> [{repo,name,version,installed,aur,description}] sorted by name
+function parseRepoList(text) {
+  var out = []
+  var lines = String(text || "").split("\n")
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i]
+    if (line === "") continue
+    var sp1 = line.indexOf(" ")
+    if (sp1 <= 0) continue
+    var sp2 = line.indexOf(" ", sp1 + 1)
+    if (sp2 < 0) continue
+    var sp3 = line.indexOf(" ", sp2 + 1)
+    out.push({
+      repo: line.substring(0, sp1),
+      name: line.substring(sp1 + 1, sp2),
+      version: sp3 < 0 ? line.substring(sp2 + 1) : line.substring(sp2 + 1, sp3),
+      installed: sp3 >= 0 && /\[\s*installed/i.test(line.substring(sp3)),
+      aur: false,
+      description: ""
+    })
+  }
+  out.sort(function(a, b) { return a.name.localeCompare(b.name) })
+  return out
+}
+
 // iudc-installed.sh output -> {native:[], foreign:[], cacheInfo:[]}
 function parseInstalled(text) {
   var res = { native: [], foreign: [], cacheInfo: [] }

@@ -50,6 +50,8 @@ Panel {
   property bool txViewActive: false
   property string prevTab: "updates"
   property int searchRunId: 0
+  property var repoList: []
+  property bool repoListLoaded: false
 
   // --- derived ------------------------------------------------------------------
   readonly property int repoCount: {
@@ -147,6 +149,12 @@ Panel {
     installedProc.running = true
   }
 
+  function loadRepoList() {
+    if (root.repoListLoaded || repolistProc.running) return
+    repolistProc.command = [root.pluginDir + "/iudc-repolist.sh"]
+    repolistProc.running = true
+  }
+
   function doSearch() {
     var q = searchField.text.trim()
     if (q === "") return
@@ -198,6 +206,7 @@ Panel {
   implicitHeight: button.implicitHeight
 
   onOpenedChanged: if (root.opened) { root.refresh(); root.loadInstalled() }
+  onTabChanged: if (root.tab === "search") root.loadRepoList()
 
   // --- IPC ----------------------------------------------------------------------
   IpcHandler {
@@ -241,6 +250,18 @@ Panel {
     }
     stderr: StdioCollector { waitForEnd: true }
     onExited: if (searchProc.runId === root.searchRunId) root.searching = false
+  }
+
+  Process {
+    id: repolistProc
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        root.repoList = Model.parseRepoList(text)
+        root.repoListLoaded = true
+      }
+    }
+    stderr: StdioCollector { waitForEnd: true }
   }
 
   Process {
@@ -591,7 +612,26 @@ Panel {
 
           Text {
             textFormat: Text.PlainText
-            visible: root.searchResults.length > 0
+            visible: searchField.text.trim() === "" && root.repoList.length > 0
+            text: root.repoList.length + " official packages \u00b7 first "
+              + Math.min(200, root.repoList.length) + " (a\u2013z)"
+            color: root.dimColor
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+
+          Text {
+            textFormat: Text.PlainText
+            visible: searchField.text.trim() === "" && root.repoList.length === 0
+            text: repolistProc.running ? "Loading\u2026" : "No official packages"
+            color: root.dimColor
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+
+          Text {
+            textFormat: Text.PlainText
+            visible: root.searchResults.length > 0 && searchField.text.trim() !== ""
             text: root.searchResults.length + " result(s)"
             color: root.dimColor
             font.family: root.bar.fontFamily
@@ -608,7 +648,7 @@ Panel {
           }
 
           Repeater {
-            model: root.searchResults
+            model: searchField.text.trim() === "" ? root.repoList.slice(0, 200) : root.searchResults
             delegate: SearchRow {}
           }
         }
