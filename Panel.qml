@@ -45,6 +45,7 @@ Panel {
   property bool loadingInfo: false
   property bool loadingInstalled: false
   property bool txRunning: false
+  property bool txCancelling: false
   property int txExitCode: -1
   property bool haveChecked: false
   property bool txViewActive: false
@@ -98,6 +99,7 @@ Panel {
     root.txLabel = label
     root.consoleLines = [">>> " + label]
     root.txRunning = true
+    root.txCancelling = false
     root.txExitCode = -1
     root.txViewActive = true
     Qt.callLater(function() { flick.contentY = 0 })
@@ -133,6 +135,16 @@ Panel {
 
   function cleanAurCache() {
     root.startTx("Clearing AUR build cache (~/.cache/yay)", "clean-aurcache")
+  }
+
+  // Cancel the running transaction: SIGTERM first (pacman/yay exit cleanly),
+  // then SIGKILL after a grace period if it ignores the request.
+  function cancelTx() {
+    if (!root.txRunning || root.txCancelling) return
+    root.txCancelling = true
+    root.appendConsole(">>> Cancelling\u2026")
+    runProc.signal(15)
+    killTimer.restart()
   }
 
   function refresh() {
@@ -304,18 +316,35 @@ Panel {
       onRead: function(data) { root.appendConsole(data) }
     }
     onExited: function(exitCode) {
+      killTimer.stop()
+      var wasCancelling = root.txCancelling
+      root.txCancelling = false
       root.txRunning = false
       root.txExitCode = exitCode
-      root.appendConsole(exitCode === 0 ? ">>> Finished OK" : ">>> Failed (exit " + exitCode + ")")
+      if (wasCancelling) {
+        root.txExitCode = -2 // cancelled sentinel
+        root.appendConsole(">>> Cancelled by user")
+      } else {
+        root.txExitCode = exitCode
+        root.appendConsole(exitCode === 0 ? ">>> Finished OK" : ">>> Failed (exit " + exitCode + ")")
+      }
       root.refresh()
       root.loadInstalled()
-      if (exitCode === 0) {
+      if (!wasCancelling && exitCode === 0) {
         var rs = root.searchResults.slice()
         for (var i = 0; i < rs.length; i++)
           rs[i].installed = root.isInstalled(rs[i].name) === "installed"
         root.searchResults = rs
       }
     }
+  }
+
+  // Escalate to SIGKILL when the transaction ignores SIGTERM.
+  Timer {
+    id: killTimer
+    interval: 5000
+    repeat: false
+    onTriggered: if (runProc.running && root.txRunning) runProc.signal(9)
   }
 
   Timer {
@@ -902,11 +931,11 @@ Panel {
           width: parent.width
 
           Button {
-            iconText: root.txExitCode === 0 ? "\uf058" : (root.txExitCode < 0 ? "\uf021" : "\uf071")
+            iconText: root.txExitCode === 0 ? "\uf058" : (root.txExitCode === -2 ? "\uf04d" : (root.txExitCode < 0 ? "\uf021" : "\uf071"))
             text: "Last operation: " + root.txLabel + " \u2014 click to review"
             tooltipText: "Reopen transaction output"
             fontSize: Style.font.caption
-            foreground: root.txExitCode === 0 ? root.okColor : (root.txExitCode < 0 ? root.dimColor : root.urgentC)
+            foreground: root.txExitCode === 0 ? root.okColor : (root.txExitCode === -2 ? root.aurColor : (root.txExitCode < 0 ? root.dimColor : root.urgentC))
             accent: root.accentC
             fontFamily: root.bar.fontFamily
             bordered: true
@@ -954,10 +983,12 @@ Panel {
               }
               Text {
                 textFormat: Text.PlainText
-                text: root.txRunning ? "running\u2026"
-                  : (root.txExitCode === 0 ? "Finished OK" : (root.txExitCode < 0 ? "" : "Failed (exit " + root.txExitCode + ")"))
-                color: root.txRunning ? root.okColor
-                  : (root.txExitCode === 0 ? root.okColor : root.urgentC)
+                text: root.txRunning ? (root.txCancelling ? "cancelling\u2026" : "running\u2026")
+                  : (root.txExitCode === 0 ? "Finished OK"
+                    : (root.txExitCode === -2 ? "Cancelled" : (root.txExitCode < 0 ? "" : "Failed (exit " + root.txExitCode + ")")))
+                color: root.txRunning ? (root.txCancelling ? root.aurColor : root.okColor)
+                  : (root.txExitCode === 0 ? root.okColor
+                    : (root.txExitCode === -2 ? root.aurColor : root.urgentC))
                 font.family: root.bar.fontFamily
                 font.pixelSize: Style.font.caption
                 font.bold: true
@@ -971,6 +1002,20 @@ Panel {
               anchors.verticalCenter: parent.verticalCenter
               spacing: Style.space(4)
 
+              Button {
+                visible: root.txRunning
+                iconText: root.txCancelling ? "\uf021" : "\uf04d"
+                text: root.txCancelling ? "Cancelling\u2026" : "Cancel"
+                tooltipText: "Stop the running operation (SIGTERM, then SIGKILL)"
+                fontSize: Style.font.caption
+                foreground: root.urgentC
+                accent: root.accentC
+                fontFamily: root.bar.fontFamily
+                bordered: true
+                enabled: !root.txCancelling
+                iconSpinning: root.txCancelling
+                onClicked: root.cancelTx()
+              }
               Button {
                 iconText: "\uf060"
                 tooltipText: "Back"
@@ -1053,7 +1098,7 @@ Panel {
           Text {
             textFormat: Text.PlainText
             text: root.txRunning
-              ? "The panel stays here until it finishes \u00b7 output streams live"
+              ? "The panel stays here until it finishes \u00b7 output streams live \u00b7 Cancel stops the operation"
               : "Esc or Back to return \u00b7 output kept until you discard it"
             color: root.dimColor
             font.family: root.bar.fontFamily

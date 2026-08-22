@@ -12,6 +12,7 @@ A package manager living in the Omarchy bar: pacman + AUR update notifier, packa
 - **Installed tab** — browse native vs foreign packages with sizes, jump straight to details, remove packages.
 - **Cache tab** — clean the pacman package cache (`paccache`, keeping your chosen number of old versions) and the AUR build cache (`~/.cache/yay`).
 - **Live transaction console** — every privileged operation streams its output into the panel itself (no floating terminal); Esc or *Back* returns to the tabs, a "last operation" pill reopens the log afterwards.
+- **Cancellable transactions** — a running install (including long AUR builds), upgrade or removal can be stopped from the transaction view: *Cancel* sends SIGTERM to the whole process tree (yay, makepkg and its privileged children), escalating to SIGKILL after 5 s if needed.
 - **Details view** — description, version, size, dependencies and more for any package.
 
 All colors follow your active Omarchy theme tokens.
