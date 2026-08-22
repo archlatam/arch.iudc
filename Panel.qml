@@ -85,7 +85,11 @@ Panel {
   }
 
   function appendConsole(line) {
-    var l = Model.clean(line)
+    var raw = String(line || "")
+    // Hard per-line ceiling: hostile package/hook output must never balloon
+    // shell memory (also bounds the regex work in Model.clean below).
+    if (raw.length > 8000) raw = raw.slice(0, 8000) + " \u2026"
+    var l = Model.clean(raw)
     if (l === "") return
     root.consoleLines.push(l)
     if (root.consoleLines.length > 500) root.consoleLines.splice(0, root.consoleLines.length - 500)
@@ -236,14 +240,15 @@ Panel {
   }
 
   // --- processes ------------------------------------------------------------------
+  // All data streams are collected through BoundedCollector (hard ceiling) so
+  // hostile repository/package output can never force unbounded buffering.
   Process {
     id: checkProc
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: root.updates = Model.parseCheck(text)
-    }
-    stderr: StdioCollector { waitForEnd: true }
+    stdout: BoundedCollector { id: checkOut }
+    stderr: BoundedCollector {}
     onExited: function(exitCode) {
+      checkOut.done = true
+      root.updates = Model.parseCheck(checkOut.text)
       root.checking = false
       root.haveChecked = true
     }
@@ -253,60 +258,64 @@ Panel {
     id: searchProc
     property int runId: 0
     property string lastQuery: ""
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
+    stdout: BoundedCollector {
+      id: searchOut
+      onFinished: {
         if (searchProc.runId !== root.searchRunId) return
-        var res = Model.parseSearch(text)
+        var res = Model.parseSearch(searchOut.text)
         root.searchResults = Model.rankSearch(res.repo, res.aur, searchProc.lastQuery).slice(0, 60)
         root.searching = false
       }
     }
-    stderr: StdioCollector { waitForEnd: true }
-    onExited: if (searchProc.runId === root.searchRunId) root.searching = false
+    stderr: BoundedCollector {}
+    onExited: function() {
+      if (searchProc.runId !== root.searchRunId) return
+      searchOut.done = true
+      searchOut.finished()
+    }
   }
 
   Process {
     id: repolistProc
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        root.repoList = Model.parseRepoList(text)
+    stdout: BoundedCollector {
+      id: repolistOut
+      onFinished: {
+        root.repoList = Model.parseRepoList(repolistOut.text)
         root.repoListLoaded = true
       }
     }
-    stderr: StdioCollector { waitForEnd: true }
+    stderr: BoundedCollector {}
+    onExited: function() {
+      repolistOut.done = true
+      repolistOut.finished()
+    }
   }
 
   Process {
     id: infoProc
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        var parsed = Model.parseInfo(text)
-        root.infoPairs = parsed.pairs
-        root.infoMap = parsed.map
-        root.loadingInfo = false
-      }
+    stdout: BoundedCollector { id: infoOut }
+    stderr: BoundedCollector {}
+    onExited: function() {
+      infoOut.done = true
+      var parsed = Model.parseInfo(infoOut.text)
+      root.infoPairs = parsed.pairs
+      root.infoMap = parsed.map
+      root.loadingInfo = false
     }
-    stderr: StdioCollector { waitForEnd: true }
-    onExited: function() { root.loadingInfo = false }
   }
 
   Process {
     id: installedProc
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        var res = Model.parseInstalled(text)
-        root.nativePkgs = res.native
-        root.foreignPkgs = res.foreign
-        root.cacheInfo = res.cacheInfo
-        root.loadingInstalled = false
-      }
+    stdout: BoundedCollector { id: installedOut }
+    stderr: BoundedCollector {}
+    onExited: function() {
+      installedOut.done = true
+      var res = Model.parseInstalled(installedOut.text)
+      root.nativePkgs = res.native
+      root.foreignPkgs = res.foreign
+      root.cacheInfo = res.cacheInfo
+      root.loadingInstalled = false
     }
-    stderr: StdioCollector { waitForEnd: true }
-    onExited: function() { root.loadingInstalled = false }
   }
 
   Process {
@@ -1338,6 +1347,29 @@ Panel {
         font.family: root.bar.fontFamily
         font.pixelSize: Style.font.caption * 0.85
       }
+    }
+  }
+
+  // Line accumulator with a hard ceiling so hostile command output can never
+  // balloon shell memory; past maxChars the remainder is dropped and marked.
+  // `done` marks process exit — chunks arriving afterwards re-emit finished()
+  // so consumers always see the complete (possibly truncated) text.
+  component BoundedCollector: SplitParser {
+    id: bcol
+    property int maxChars: 2 * 1024 * 1024
+    property bool done: false
+    property string text: ""
+    property bool truncated: false
+    signal finished()
+    onRead: function(data) {
+      if (!bcol.truncated && bcol.text.length < bcol.maxChars) {
+        var room = bcol.maxChars - bcol.text.length
+        var piece = data.length > room ? data.slice(0, room) : data
+        bcol.text += piece + "\n"
+        if (piece.length < data.length || bcol.text.length >= bcol.maxChars)
+          bcol.truncated = true
+      }
+      if (bcol.done) bcol.finished()
     }
   }
 }

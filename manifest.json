@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "arch.iudc",
   "name": "Pacman",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "author": "m4teoarg",
   "license": "MIT",
   "description": "Package manager in the Omarchy bar: pacman + AUR update notifier, package search, install/remove, integrated transaction console and cache cleaner.",
