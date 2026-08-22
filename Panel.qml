@@ -245,7 +245,8 @@ Panel {
   Process {
     id: checkProc
     stdout: BoundedCollector { id: checkOut }
-    stderr: BoundedCollector {}
+    stderr: BoundedCollector { id: checkErr }
+    onStarted: { checkOut.reset(); checkErr.reset() }
     onExited: function(exitCode) {
       checkOut.done = true
       root.updates = Model.parseCheck(checkOut.text)
@@ -267,7 +268,8 @@ Panel {
         root.searching = false
       }
     }
-    stderr: BoundedCollector {}
+    stderr: BoundedCollector { id: searchErr }
+    onStarted: { searchOut.reset(); searchErr.reset() }
     onExited: function() {
       if (searchProc.runId !== root.searchRunId) return
       searchOut.done = true
@@ -284,7 +286,8 @@ Panel {
         root.repoListLoaded = true
       }
     }
-    stderr: BoundedCollector {}
+    stderr: BoundedCollector { id: repolistErr }
+    onStarted: { repolistOut.reset(); repolistErr.reset() }
     onExited: function() {
       repolistOut.done = true
       repolistOut.finished()
@@ -294,7 +297,8 @@ Panel {
   Process {
     id: infoProc
     stdout: BoundedCollector { id: infoOut }
-    stderr: BoundedCollector {}
+    stderr: BoundedCollector { id: infoErr }
+    onStarted: { infoOut.reset(); infoErr.reset() }
     onExited: function() {
       infoOut.done = true
       var parsed = Model.parseInfo(infoOut.text)
@@ -307,7 +311,8 @@ Panel {
   Process {
     id: installedProc
     stdout: BoundedCollector { id: installedOut }
-    stderr: BoundedCollector {}
+    stderr: BoundedCollector { id: installedErr }
+    onStarted: { installedOut.reset(); installedErr.reset() }
     onExited: function() {
       installedOut.done = true
       var res = Model.parseInstalled(installedOut.text)
@@ -1354,6 +1359,8 @@ Panel {
   // balloon shell memory; past maxChars the remainder is dropped and marked.
   // `done` marks process exit — chunks arriving afterwards re-emit finished()
   // so consumers always see the complete (possibly truncated) text.
+  // reset() must run before each launch (onStarted) because Quickshell reuses
+  // the same parser instance across runs of one Process.
   component BoundedCollector: SplitParser {
     id: bcol
     property int maxChars: 2 * 1024 * 1024
@@ -1361,6 +1368,11 @@ Panel {
     property string text: ""
     property bool truncated: false
     signal finished()
+    function reset() {
+      text = ""
+      truncated = false
+      done = false
+    }
     onRead: function(data) {
       if (!bcol.truncated && bcol.text.length < bcol.maxChars) {
         var room = bcol.maxChars - bcol.text.length
