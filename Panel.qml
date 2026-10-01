@@ -74,7 +74,7 @@ Panel {
   readonly property color accentC: root.bar && root.bar.accent !== undefined ? root.bar.accent : Color.accent
   readonly property color urgentC: root.bar ? root.bar.urgent : Color.urgent
 
-  readonly property string iconText: "\ueefe"
+  readonly property string iconText: "\uf019"
   readonly property color iconColor: root.haveChecked && root.totalUpdates > 0 ? root.urgentC : root.fg
   readonly property string statusPhrase: {
     if (root.checking) return "Checking for updates\u2026"
