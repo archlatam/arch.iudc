@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# arch.iudc — pending update check.
+# Emits tab-separated lines:  name<TAB>oldver<TAB>newver
+set -uo pipefail
+export LC_ALL=C
+
+checkupdates 2>/dev/null |
+  awk -F' -> ' '{ n=split($1,a," "); if (n>=2) print a[1]"\t"a[2]"\t"$2 }'
+
+exit 0

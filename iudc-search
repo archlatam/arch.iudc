@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# arch.iudc — package search across the official repositories.
+# $1 = query (sanitized by caller). Emits pacman -Ss output; parsed by Model.js.
+set -uo pipefail
+export LC_ALL=C
+
+q="${1:-}"
+[[ -n $q ]] || exit 0
+
+pacman -Ss --color=never -- "$q" 2>/dev/null
+
+exit 0

@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# arch.iudc — transaction runner. Invoked from the panel as
+#   sudo <pluginDir>/iudc-run <mode> [args]
+# so the default terminal asks for the root password before running anything.
+# All output goes to stdout/stderr and stays in that terminal.
+#
+# Usage: iudc-run <mode> [args]
+#   sync                    refresh databases            (pacman -Sy)
+#   install-repo <pkg>      install from official repos  (pacman -S)
+#   remove <pkg>            uninstall package            (pacman -Rns)
+#   clean-paccache <keep>   prune pacman cache versions  (paccache -rk)
+set -uo pipefail
+export LC_ALL=C
+
+mode="${1:-}"
+arg="${2:-}"
+
+fail() { echo "iudc: $*" >&2; exit 1; }
+
+# Run a command in its own process group (setsid) so an interrupted
+# transaction tears down the whole tree (pacman hooks and their children), not
+# just the top-level process. Ctrl+C in the terminal signals the runner; the
+# trap forwards it to the group.
+_child=""
+teardown() {
+  [[ -n $_child ]] || exit 143
+  kill -TERM -- -"$_child" 2>/dev/null
+  kill -TERM "$_child" 2>/dev/null
+}
+trap teardown TERM INT
+
+run() {
+  setsid "$@" &
+  _child=$!
+  wait "$_child"
+  local rc=$?
+  _child=""
+  exit $rc
+}
+
+case "$mode" in
+  sync)
+    echo ">>> Syncing package databases…"
+    run pacman -Sy --color=never
+    ;;
+  install-repo)
+    [[ -n $arg ]] || fail "missing package name"
+    echo ">>> Installing repository package: $arg"
+    run pacman -S --color=never --noconfirm --needed "$arg"
+    ;;
+  remove)
+    [[ -n $arg ]] || fail "missing package name"
+    echo ">>> Removing package: $arg"
+    run pacman -Rns --color=never --noconfirm "$arg"
+    ;;
+  clean-paccache)
+    keep="${arg:-2}"
+    [[ $keep =~ ^[0-9]+$ ]] || keep=2
+    echo ">>> Pruning pacman cache (keeping $keep version(s))…"
+    run paccache -rk "$keep"
+    ;;
+  *)
+    fail "unknown mode: $mode"
+    ;;
+esac

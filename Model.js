@@ -1,31 +1,14 @@
-// arch.iudc — output parsers for pacman/yay commands.
+// arch.iudc — output parsers for pacman command output.
 .pragma library
 
-// Strip ANSI escape sequences and normalize \r progress overwrites.
-function clean(s) {
-  var t = String(s || "")
-  t = t.replace(/\x1B\[[0-9;?]*[a-zA-Z]/g, "")
-  t = t.replace(/\x1B\][^\x07]*(\x07|\x1B\\)/g, "")
-  // Progress bars reuse one line with \r — keep only the last frame.
-  if (t.indexOf("\r") >= 0) {
-    var lines = t.split("\n")
-    for (var i = 0; i < lines.length; i++) {
-      if (lines[i].indexOf("\r") >= 0)
-        lines[i] = lines[i].split("\r").pop()
-    }
-    t = lines.join("\n")
-  }
-  return t.replace(/\n{3,}/g, "\n\n").replace(/[ \t]+$/gm, "").trim()
-}
-
-// iudc-check.sh output -> [{source,name,old,new}]
+// iudc-check output -> [{name,old,new}]
 function parseCheck(text) {
   var out = []
   var lines = String(text || "").split("\n")
   for (var i = 0; i < lines.length; i++) {
     var p = lines[i].split("\t")
-    if (p.length >= 4 && (p[0] === "repo" || p[0] === "aur") && p[1] !== "")
-      out.push({ source: p[0], name: p[1], old: p[2], new: p[3] })
+    if (p.length >= 3 && p[0] !== "")
+      out.push({ name: p[0], old: p[1], new: p[2] })
   }
   return out
 }
@@ -44,49 +27,42 @@ function _searchEntry(header, descLines) {
     version: tail.split(" ")[0] || "",
     meta: tail.trim(),
     installed: /\[installed/i.test(tail),
-    aur: header.indexOf("aur/") === 0,
     description: (descLines || []).join(" ").trim()
   }
 }
 
-// iudc-search.sh output -> {repo:[], aur:[]}
+// iudc-search output -> [{repo,name,version,installed,description}]
 function parseSearch(text) {
-  var res = { repo: [], aur: [] }
-  var section = ""
+  var out = []
   var cur = null
   var desc = []
   var flush = function() {
     if (!cur) return
     cur.description = desc.join(" ").trim()
-    ;(cur.aur ? res.aur : res.repo).push(cur)
+    out.push(cur)
     cur = null
     desc = []
   }
   var lines = String(text || "").split("\n")
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i]
-    if (line === "---IUDC-REPO---" || line === "---IUDC-AUR---") {
-      flush()
-      section = line
-      continue
-    }
     if (line === "") continue
     if (line.charAt(0) === " " || line.charAt(0) === "\t") {
       if (cur) desc.push(line.trim())
       continue
     }
-    var entry = _searchEntry(line.replace(/^(core|extra|multilib|aur|chaotic-aur)\//, function(m){ return m }))
+    var entry = _searchEntry(line)
     if (!entry) continue
     flush()
     cur = entry
   }
   flush()
-  return res
+  return out
 }
 
-// Ranked merge for search results: official repos first, then relevance
-// (exact name > name prefix > name contains > description only), alphabetical.
-function rankSearch(repoArr, aurArr, query) {
+// Ranked search results: relevance (exact name > name prefix > name contains >
+// description only), alphabetical.
+function rankSearch(entries, query) {
   var q = String(query || "").toLowerCase()
   var score = function(e) {
     var n = e.name.toLowerCase()
@@ -96,7 +72,6 @@ function rankSearch(repoArr, aurArr, query) {
     return 3
   }
   var cmp = function(a, b) {
-    if (a.aur !== b.aur) return a.aur ? 1 : -1
     var sa = score(a)
     var sb = score(b)
     if (sa !== sb) return sa - sb
@@ -104,10 +79,10 @@ function rankSearch(repoArr, aurArr, query) {
     // and equivalent for package names (ASCII).
     return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0)
   }
-  return repoArr.concat(aurArr).sort(cmp)
+  return entries.sort(cmp)
 }
 
-// iudc-repolist.sh output -> [{repo,name,version,installed,aur,description}] sorted by name
+// iudc-repolist output -> [{repo,name,version,installed,description}] sorted by name
 function parseRepoList(text) {
   var out = []
   var lines = String(text || "").split("\n")
@@ -124,7 +99,6 @@ function parseRepoList(text) {
       name: line.substring(sp1 + 1, sp2),
       version: sp3 < 0 ? line.substring(sp2 + 1) : line.substring(sp2 + 1, sp3),
       installed: sp3 >= 0 && /\[\s*installed/i.test(line.substring(sp3)),
-      aur: false,
       description: ""
     })
   }
@@ -133,23 +107,22 @@ function parseRepoList(text) {
   return out
 }
 
-// iudc-installed.sh output -> {native:[], foreign:[], cacheInfo:[]}
+// iudc-installed output -> {native:[], cacheInfo:[]}
 function parseInstalled(text) {
-  var res = { native: [], foreign: [], cacheInfo: [] }
+  var res = { native: [], cacheInfo: [] }
   var section = ""
   var lines = String(text || "").split("\n")
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i]
-    if (line === "---IUDC-NATIVE---" || line === "---IUDC-FOREIGN---" || line === "---IUDC-CACHE---") {
+    if (line === "---IUDC-NATIVE---" || line === "---IUDC-CACHE---") {
       section = line
       continue
     }
     if (line === "") continue
-    if (section === "---IUDC-NATIVE---" || section === "---IUDC-FOREIGN---") {
+    if (section === "---IUDC-NATIVE---") {
       var sp = line.lastIndexOf(" ")
       if (sp > 0)
-        (section === "---IUDC-NATIVE---" ? res.native : res.foreign)
-          .push({ name: line.substring(0, sp), version: line.substring(sp + 1), aur: section === "---IUDC-FOREIGN---" })
+        res.native.push({ name: line.substring(0, sp), version: line.substring(sp + 1) })
     } else if (section === "---IUDC-CACHE---") {
       res.cacheInfo.push(line.trim())
     }

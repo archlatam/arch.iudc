@@ -8,9 +8,9 @@ import qs.Commons
 import "Model.js" as Model
 
 // arch.iudc — Pacman package manager for the Omarchy bar.
-// Notifier icon (pacman+AUR update states) plus a popup panel with updates,
-// search, installed packages, package details, a live transaction console,
-// and cache cleaning. Icons are Nerd Fonts glyphs.
+// Notifier icon (update states) plus a popup panel with updates, search,
+// installed packages, package details, and cache cleaning. Privileged
+// actions open in the system's default terminal. Icons are Nerd Fonts glyphs.
 Panel {
   id: root
   moduleName: "arch.iudc"
@@ -19,7 +19,6 @@ Panel {
 
   // --- config ---------------------------------------------------------------
   readonly property int refreshIntervalSec: root.setting("refreshIntervalSec", 1800)
-  readonly property bool includeAur: root.setting("includeAur", true)
   readonly property int cacheKeepVersions: root.setting("cacheKeepVersions", 2)
 
   // --- plugin dir -------------------------------------------------------------
@@ -31,160 +30,89 @@ Panel {
   property var updates: []
   property var searchResults: []
   property var nativePkgs: []
-  property var foreignPkgs: []
   property var cacheInfo: []
   property string tab: "updates"
   property string selectedPkg: ""
   property string selectedState: "remote"
   property var infoPairs: []
   property var infoMap: ({})
-  property var consoleLines: []
-  property var pendingConsole: []
-  property string txLabel: ""
   property bool checking: false
   property bool searching: false
   property bool loadingInfo: false
   property bool loadingInstalled: false
-  property bool txRunning: false
-  property bool txCancelling: false
-  property int txExitCode: -1
   property bool haveChecked: false
-  property bool txViewActive: false
-  property string prevTab: "updates"
   property int searchRunId: 0
   property string lastCompletedQuery: ""
   property var repoList: []
   property bool repoListLoaded: false
 
   // --- derived ------------------------------------------------------------------
-  readonly property int repoCount: {
-    var n = 0
-    for (var i = 0; i < root.updates.length; i++) if (root.updates[i].source === "repo") n++
-    return n
-  }
-  readonly property int aurCount: root.updates.length - root.repoCount
   readonly property int totalUpdates: root.updates.length
-  readonly property int installedCount: root.nativePkgs.length + root.foreignPkgs.length
+  readonly property int installedCount: root.nativePkgs.length
 
-  // Notifier colors: red = repo updates, amber = only AUR, green = clean.
+  // Notifier colors: red = updates pending, green = clean.
   readonly property color okColor: "#43a047"
-  readonly property color aurColor: "#e3a117"
-  readonly property color dimColor: root.bar ? Qt.darker(root.bar.foreground, 1.45) : Color.foreground
-  readonly property color fg: root.bar ? root.bar.foreground : Color.foreground
-  readonly property color accentC: root.bar && root.bar.accent !== undefined ? root.bar.accent : Color.accent
-  readonly property color urgentC: root.bar ? root.bar.urgent : Color.urgent
+  readonly property color dimColor: root.bar ? Qt.darker(root.bar.foreground, 1.45) : ShellColor.foreground
+  readonly property color fg: root.bar ? root.bar.foreground : ShellColor.foreground
+  readonly property color accentC: root.bar && root.bar.accent !== undefined ? root.bar.accent : ShellColor.accent
+  readonly property color urgentC: root.bar ? root.bar.urgent : ShellColor.urgent
 
-  readonly property string iconText: "\uf019"
+  readonly property string iconText: "\uDB80\uDFD6"
   readonly property color iconColor: root.haveChecked && root.totalUpdates > 0 ? root.urgentC : root.fg
   readonly property string statusPhrase: {
     if (root.checking) return "Checking for updates\u2026"
     if (!root.haveChecked) return "Not checked yet"
     if (root.totalUpdates === 0) return "System up to date"
-    var parts = []
-    if (root.repoCount > 0) parts.push(root.repoCount + " package update" + (root.repoCount === 1 ? "" : "s"))
-    if (root.aurCount > 0) parts.push(root.aurCount + " package update" + (root.aurCount === 1 ? "" : "s"))
-    return parts.join(" \u00b7 ")
+    return root.totalUpdates + " package update" + (root.totalUpdates === 1 ? "" : "s")
   }
 
-  // Console lines are buffered and flushed in batches: rebuilding the joined
-  // Text once per output line caused full re-layouts hundreds of times per
-  // transaction, which froze the panel during verbose installs.
-  function appendConsole(line) {
-    var raw = String(line || "")
-    // Hard per-line ceiling: hostile package/hook output must never balloon
-    // shell memory (also bounds the regex work in Model.clean below).
-    if (raw.length > 8000) raw = raw.slice(0, 8000) + " \u2026"
-    var l = Model.clean(raw)
-    if (l === "") return
-    root.pendingConsole.push(l)
-    if (root.pendingConsole.length === 1) consoleFlush.restart()
+  // Privileged actions never run inside the panel: they open in the system's
+  // default terminal, where sudo asks for the root password interactively.
+  function runInTerminal(mode, arg) {
+    var cmd = "sudo " + Util.shellQuote(root.pluginDir + "/iudc-run") + " " + mode
+    if (arg !== undefined && arg !== "") cmd += " " + Util.shellQuote(arg)
+    if (root.bar) root.bar.run("omarchy-launch-floating-terminal-with-presentation " + Util.shellQuote(cmd))
   }
 
-  function flushConsole() {
-    if (root.pendingConsole.length === 0) return
-    for (var i = 0; i < root.pendingConsole.length; i++)
-      root.consoleLines.push(root.pendingConsole[i])
-    root.pendingConsole = []
-    if (root.consoleLines.length > 500) root.consoleLines.splice(0, root.consoleLines.length - 500)
-    root.consoleLinesChanged()
-  }
-
-  function startTx(label, mode, arg) {
-    if (root.txRunning) return
-    if (!root.txViewActive) root.prevTab = root.tab
-    root.tab = "updates"
-    root.txLabel = label
-    consoleFlush.stop()
-    root.pendingConsole = []
-    root.consoleLines = [">>> " + label]
-    root.txRunning = true
-    root.txCancelling = false
-    root.txExitCode = -1
-    root.txViewActive = true
-    Qt.callLater(function() { flick.contentY = 0 })
-    runProc.command = [root.pluginDir + "/iudc-run.sh", mode].concat(arg !== undefined && arg !== "" ? [arg] : [])
-    runProc.running = true
-  }
-
-  function syncDbs() { root.startTx("Syncing databases (pacman -Sy)", "sync") }
+  function syncDbs() { root.runInTerminal("sync") }
 
   function upgradeAll() {
     // Hand the upgrade to Omarchy's official updater in a floating terminal:
-    // it prompts for sudo, snapshots, migrates and covers AUR + orphans.
+    // it prompts for sudo, snapshots and runs the system migrations.
     if (root.bar) root.bar.run("omarchy-launch-floating-terminal-with-presentation omarchy-update")
   }
 
-  function installPkg(name, source) {
+  function installPkg(name) {
     if (!name) return
-    if (source === "aur") root.startTx("Installing AUR package " + name, "install-aur", name)
-    else root.startTx("Installing " + name, "install-repo", name)
-  }
-
-  function reinstallPkg(name) {
-    if (!name) return
-    root.startTx("Reinstalling " + name, "install-repo", name)
+    root.runInTerminal("install-repo", name)
   }
 
   function removePkg(name) {
     if (!name) return
-    root.startTx("Removing " + name, "remove", name)
+    root.runInTerminal("remove", name)
   }
 
   function cleanPaccache() {
-    root.startTx("Pruning pacman cache (keep " + root.cacheKeepVersions + ")", "clean-paccache", String(root.cacheKeepVersions))
-  }
-
-  function cleanAurCache() {
-    root.startTx("Clearing AUR build cache (~/.cache/yay)", "clean-aurcache")
-  }
-
-  // Cancel the running transaction: SIGTERM first (pacman/yay exit cleanly),
-  // then SIGKILL after a grace period if it ignores the request.
-  function cancelTx() {
-    if (!root.txRunning || root.txCancelling) return
-    root.txCancelling = true
-    root.appendConsole(">>> Cancelling\u2026")
-    runProc.signal(15)
-    killTimer.restart()
+    root.runInTerminal("clean-paccache", String(root.cacheKeepVersions))
   }
 
   function refresh() {
     if (root.checking) return
     root.checking = true
-    checkProc.command = [root.pluginDir + "/iudc-check.sh", root.includeAur ? "all" : "repo"]
+    checkProc.command = [root.pluginDir + "/iudc-check"]
     checkProc.running = true
   }
 
   function loadInstalled() {
     if (root.loadingInstalled) return
     root.loadingInstalled = true
-    installedProc.command = [root.pluginDir + "/iudc-installed.sh"]
+    installedProc.command = [root.pluginDir + "/iudc-installed"]
     installedProc.running = true
   }
 
   function loadRepoList() {
     if (root.repoListLoaded || repolistProc.running) return
-    repolistProc.command = [root.pluginDir + "/iudc-repolist.sh"]
+    repolistProc.command = [root.pluginDir + "/iudc-repolist"]
     repolistProc.running = true
   }
 
@@ -198,7 +126,7 @@ Panel {
     root.searching = true
     root.searchResults = []
     searchProc.lastQuery = q
-    searchProc.command = [root.pluginDir + "/iudc-search.sh", q]
+    searchProc.command = [root.pluginDir + "/iudc-search", q]
     searchProc.running = true
   }
 
@@ -210,7 +138,7 @@ Panel {
     root.infoPairs = []
     root.infoMap = {}
     infoProc.command = ["bash", "-c",
-      root.pluginDir + "/iudc-info.sh " + Util.shellQuote(name) + " " + Util.shellQuote(root.selectedState)]
+      root.pluginDir + "/iudc-info " + Util.shellQuote(name) + " " + Util.shellQuote(root.selectedState)]
     infoProc.running = true
   }
 
@@ -222,25 +150,18 @@ Panel {
 
   function isInstalled(name) {
     for (var i = 0; i < root.nativePkgs.length; i++) if (root.nativePkgs[i].name === name) return "installed"
-    for (var j = 0; j < root.foreignPkgs.length; j++) if (root.foreignPkgs[j].name === name) return "installed"
     return "remote"
-  }
-
-  function detailIsAur() {
-    for (var i = 0; i < root.searchResults.length; i++)
-      if (root.searchResults[i].name === root.selectedPkg) return root.searchResults[i].aur ? "aur" : "repo"
-    for (var j = 0; j < root.foreignPkgs.length; j++)
-      if (root.foreignPkgs[j].name === root.selectedPkg) return "aur"
-    for (var k = 0; k < root.updates.length; k++)
-      if (root.updates[k].name === root.selectedPkg) return root.updates[k].source
-    return "repo"
   }
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
   onOpenedChanged: if (root.opened) { root.refresh(); root.loadInstalled() }
-  onTabChanged: if (root.tab === "search") root.loadRepoList()
+  onTabChanged: {
+    if (root.tab === "search") root.loadRepoList()
+    else if (root.tab === "installed") root.loadInstalled()
+    else if (root.tab === "updates") root.refresh()
+  }
 
   // --- IPC ----------------------------------------------------------------------
   IpcHandler {
@@ -279,8 +200,7 @@ Panel {
       id: searchOut
       onFinished: {
         if (searchProc.runId !== root.searchRunId) return
-        var res = Model.parseSearch(searchOut.text)
-        root.searchResults = Model.rankSearch(res.repo, res.aur, searchProc.lastQuery)
+        root.searchResults = Model.rankSearch(Model.parseSearch(searchOut.text), searchProc.lastQuery)
         root.lastCompletedQuery = searchProc.lastQuery
         root.searching = false
       }
@@ -334,51 +254,13 @@ Panel {
       installedOut.done = true
       var res = Model.parseInstalled(installedOut.text)
       root.nativePkgs = res.native
-      root.foreignPkgs = res.foreign
       root.cacheInfo = res.cacheInfo
       root.loadingInstalled = false
+      var rs = root.searchResults.slice()
+      for (var i = 0; i < rs.length; i++)
+        rs[i].installed = root.isInstalled(rs[i].name) === "installed"
+      root.searchResults = rs
     }
-  }
-
-  Process {
-    id: runProc
-    stdout: SplitParser {
-      onRead: function(data) { root.appendConsole(data) }
-    }
-    stderr: SplitParser {
-      onRead: function(data) { root.appendConsole(data) }
-    }
-    onExited: function(exitCode) {
-      killTimer.stop()
-      var wasCancelling = root.txCancelling
-      root.txCancelling = false
-      root.txRunning = false
-      root.txExitCode = exitCode
-      if (wasCancelling) {
-        root.txExitCode = -2 // cancelled sentinel
-        root.appendConsole(">>> Cancelled by user")
-      } else {
-        root.txExitCode = exitCode
-        root.appendConsole(exitCode === 0 ? ">>> Finished OK" : ">>> Failed (exit " + exitCode + ")")
-      }
-      root.refresh()
-      root.loadInstalled()
-      root.flushConsole()
-      if (!wasCancelling && exitCode === 0) {
-        var rs = root.searchResults.slice()
-        for (var i = 0; i < rs.length; i++)
-          rs[i].installed = root.isInstalled(rs[i].name) === "installed"
-        root.searchResults = rs
-      }
-    }
-  }
-
-  // Escalate to SIGKILL when the transaction ignores SIGTERM.
-  Timer {
-    id: killTimer
-    interval: 5000
-    repeat: false
-    onTriggered: if (runProc.running && root.txRunning) runProc.signal(9)
   }
 
   Timer {
@@ -393,14 +275,6 @@ Panel {
     id: searchDebounce
     interval: 250
     onTriggered: root.doSearch()
-  }
-
-  // Batches console output into ~8 UI updates per second instead of one
-  // full Text rebuild per streamed line.
-  Timer {
-    id: consoleFlush
-    interval: 120
-    onTriggered: root.flushConsole()
   }
 
   // --- bar button --------------------------------------------------------------------
@@ -429,12 +303,12 @@ Panel {
       width: 13
       height: 13
       radius: 7
-      color: root.repoCount > 0 ? root.urgentC : root.accentC
+      color: root.urgentC
       Text {
         textFormat: Text.PlainText
         anchors.centerIn: parent
         text: root.totalUpdates > 99 ? "99+" : root.totalUpdates
-        color: root.bar ? root.bar.background : Color.background
+        color: root.bar ? root.bar.background : ShellColor.background
         font.pixelSize: 7
         font.bold: true
       }
@@ -456,17 +330,14 @@ Panel {
       id: keyCatcher
       anchors.fill: parent
 
-      onCloseRequested: {
-        if (root.txViewActive && !root.txRunning) root.txViewActive = false
-        else root.close()
-      }
+      onCloseRequested: root.close()
       onTextKey: function(t) {
         if (t === "r" || t === "R") root.refresh()
         else if (t === "1") root.tab = "updates"
         else if (t === "2") root.tab = "search"
         else if (t === "3") root.tab = "installed"
         else if (t === "4") root.tab = "cache"
-        else if ((t === "u" || t === "U") && !root.txRunning) root.upgradeAll()
+        else if (t === "u" || t === "U") root.upgradeAll()
       }
     }
 
@@ -547,11 +418,10 @@ Panel {
             }
             Button {
               iconText: "\uf1c0"
-              tooltipText: "Sync package databases"
+              tooltipText: "Sync package databases (opens a terminal)"
               foreground: root.fg
               accent: root.accentC
               fontFamily: root.bar.fontFamily
-              enabled: !root.txRunning
               onClicked: root.syncDbs()
             }
             Button {
@@ -569,7 +439,6 @@ Panel {
 
         // ---------- Tabs ----------
         RowLayout {
-          visible: !root.txViewActive
           width: parent.width
           spacing: Style.space(6)
 
@@ -580,13 +449,12 @@ Panel {
         }
 
         PanelSeparator {
-          visible: !root.txViewActive
           foreground: root.fg
         }
 
         // ---------- UPDATES ----------
         Column {
-          visible: root.tab === "updates" && !root.txViewActive
+          visible: root.tab === "updates"
           width: parent.width
           spacing: Style.space(8)
 
@@ -616,7 +484,7 @@ Panel {
               accent: root.accentC
               fontFamily: root.bar.fontFamily
               bordered: true
-              enabled: !root.txRunning && !root.checking
+              enabled: !root.checking
               onClicked: root.totalUpdates > 0 ? root.upgradeAll() : root.refresh()
             }
           }
@@ -638,7 +506,7 @@ Panel {
 
         // ---------- SEARCH ----------
         Column {
-          visible: root.tab === "search" && !root.txViewActive
+          visible: root.tab === "search"
           width: parent.width
           spacing: Style.space(8)
 
@@ -649,7 +517,7 @@ Panel {
             TextField {
               id: searchField
               Layout.fillWidth: true
-              placeholderText: "Search repositories and AUR\u2026"
+              placeholderText: "Search repositories\u2026"
               foreground: root.fg
               accent: root.accentC
               font.family: root.bar.fontFamily
@@ -737,7 +605,7 @@ Panel {
 
         // ---------- INSTALLED ----------
         Column {
-          visible: root.tab === "installed" && !root.txViewActive
+          visible: root.tab === "installed"
           width: parent.width
           spacing: Style.space(8)
 
@@ -745,7 +613,7 @@ Panel {
             textFormat: Text.PlainText
             text: root.loadingInstalled
               ? "Loading\u2026"
-              : root.installedCount + " packages (" + root.nativePkgs.length + " native \u00b7 " + root.foreignPkgs.length + " foreign/AUR)"
+              : root.installedCount + " packages"
             color: root.dimColor
             font.family: root.bar.fontFamily
             font.pixelSize: Style.font.caption
@@ -769,7 +637,7 @@ Panel {
             spacing: Style.space(8)
             boundsBehavior: Flickable.StopAtBounds
             model: {
-              var all = root.nativePkgs.concat(root.foreignPkgs)
+              var all = root.nativePkgs
               var f = installedFilter.text.trim()
               if (f !== "") all = all.filter(function(p) { return p.name.indexOf(f) >= 0 })
               return all
@@ -781,7 +649,7 @@ Panel {
 
         // ---------- CACHE ----------
         Column {
-          visible: root.tab === "cache" && !root.txViewActive
+          visible: root.tab === "cache"
           width: parent.width
           spacing: Style.space(10)
 
@@ -810,34 +678,20 @@ Panel {
             Button {
               iconText: "\uf187"
               text: "Prune pacman cache"
-              tooltipText: "pkexec paccache -rk " + root.cacheKeepVersions
+              tooltipText: "paccache -rk " + root.cacheKeepVersions + " (opens a terminal)"
               fontSize: Style.font.bodySmall
               foreground: root.fg
               accent: root.accentC
               fontFamily: root.bar.fontFamily
               bordered: true
-              enabled: !root.txRunning
               onClicked: root.cleanPaccache()
-            }
-
-            Button {
-              iconText: "\uf1f8"
-              text: "Clear AUR build cache"
-              tooltipText: "~/.cache/yay"
-              fontSize: Style.font.bodySmall
-              foreground: root.fg
-              accent: root.accentC
-              fontFamily: root.bar.fontFamily
-              bordered: true
-              enabled: !root.txRunning
-              onClicked: root.cleanAurCache()
             }
           }
         }
 
         // ---------- DETAIL ----------
         Column {
-          visible: root.selectedPkg !== "" && !root.txViewActive
+          visible: root.selectedPkg !== ""
           width: parent.width
           spacing: Style.space(8)
 
@@ -898,30 +752,28 @@ Panel {
               Button {
                 visible: root.selectedState === "installed"
                 iconText: "\uf021"
-                tooltipText: "Reinstall"
+                tooltipText: "Reinstall (opens a terminal)"
                 foreground: root.fg
                 accent: root.accentC
                 fontFamily: root.bar.fontFamily
-                enabled: !root.txRunning
-                onClicked: root.reinstallPkg(root.selectedPkg)
+                onClicked: root.installPkg(root.selectedPkg)
               }
               Button {
                 visible: root.selectedState === "remote"
                 iconText: "\uf019"
-                tooltipText: "Install"
+                tooltipText: "Install (opens a terminal)"
                 foreground: root.fg
                 accent: root.accentC
                 fontFamily: root.bar.fontFamily
-                enabled: !root.txRunning
-                onClicked: root.installPkg(root.selectedPkg, root.detailIsAur())
+                onClicked: root.installPkg(root.selectedPkg)
               }
               Button {
                 iconText: "\uf1f8"
-                tooltipText: "Remove (pacman -Rns)"
+                tooltipText: "Remove (pacman -Rns, opens a terminal)"
                 foreground: root.urgentC
                 accent: root.accentC
                 fontFamily: root.bar.fontFamily
-                enabled: root.selectedState === "installed" && !root.txRunning
+                enabled: root.selectedState === "installed"
                 onClicked: root.removePkg(root.selectedPkg)
               }
               Button {
@@ -976,191 +828,9 @@ Panel {
           }
         }
 
-        // ---------- Last transaction pill ----------
-        Row {
-          visible: !root.txViewActive && root.txLabel !== "" && root.consoleLines.length > 0
-          width: parent.width
-
-          Button {
-            iconText: root.txExitCode === 0 ? "\uf058" : (root.txExitCode === -2 ? "\uf04d" : (root.txExitCode < 0 ? "\uf021" : "\uf071"))
-            text: "Last operation: " + root.txLabel + " \u2014 click to review"
-            tooltipText: "Reopen transaction output"
-            fontSize: Style.font.caption
-            foreground: root.txExitCode === 0 ? root.okColor : (root.txExitCode === -2 ? root.aurColor : (root.txExitCode < 0 ? root.dimColor : root.urgentC))
-            accent: root.accentC
-            fontFamily: root.bar.fontFamily
-            bordered: true
-            onClicked: root.txViewActive = true
-          }
-        }
-
-        // ---------- TRANSACTION VIEW ----------
-        // Full-panel view for the running operation (install / upgrade /
-        // remove / cache). Every action opens this view with its live output,
-        // modal transaction-dialog style.
-        Column {
-          visible: root.txViewActive
-          width: parent.width
-          spacing: Style.space(8)
-
-          Item {
-            width: parent.width
-            implicitHeight: Math.max(txHeader.implicitHeight, txActions.implicitHeight)
-
-            Row {
-              id: txHeader
-              spacing: Style.space(6)
-              anchors.left: parent.left
-              anchors.verticalCenter: parent.verticalCenter
-
-              Rectangle {
-                width: 9
-                height: 9
-                radius: 4.5
-                anchors.verticalCenter: parent.verticalCenter
-                color: root.txRunning ? root.okColor
-                  : (root.txExitCode === 0 ? root.okColor : (root.txExitCode < 0 ? root.dimColor : root.urgentC))
-              }
-              Text {
-                textFormat: Text.PlainText
-                text: root.txLabel !== "" ? root.txLabel : "Transaction"
-                color: root.fg
-                font.family: root.bar.fontFamily
-                font.pixelSize: Style.font.subtitle
-                font.bold: true
-                elide: Text.ElideRight
-                width: Math.min(implicitWidth, Style.space(330))
-                anchors.verticalCenter: parent.verticalCenter
-              }
-              Text {
-                textFormat: Text.PlainText
-                text: root.txRunning ? (root.txCancelling ? "cancelling\u2026" : "running\u2026")
-                  : (root.txExitCode === 0 ? "Finished OK"
-                    : (root.txExitCode === -2 ? "Cancelled" : (root.txExitCode < 0 ? "" : "Failed (exit " + root.txExitCode + ")")))
-                color: root.txRunning ? (root.txCancelling ? root.aurColor : root.okColor)
-                  : (root.txExitCode === 0 ? root.okColor
-                    : (root.txExitCode === -2 ? root.aurColor : root.urgentC))
-                font.family: root.bar.fontFamily
-                font.pixelSize: Style.font.caption
-                font.bold: true
-                anchors.verticalCenter: parent.verticalCenter
-              }
-            }
-
-            Row {
-              id: txActions
-              anchors.right: parent.right
-              anchors.verticalCenter: parent.verticalCenter
-              spacing: Style.space(4)
-
-              Button {
-                visible: root.txRunning
-                iconText: root.txCancelling ? "\uf021" : "\uf04d"
-                text: root.txCancelling ? "Cancelling\u2026" : "Cancel"
-                tooltipText: "Stop the running operation (SIGTERM, then SIGKILL)"
-                fontSize: Style.font.caption
-                foreground: root.urgentC
-                accent: root.accentC
-                fontFamily: root.bar.fontFamily
-                bordered: true
-                enabled: !root.txCancelling
-                iconSpinning: root.txCancelling
-                onClicked: root.cancelTx()
-              }
-              Button {
-                iconText: "\uf060"
-                tooltipText: "Back"
-                text: "Back"
-                fontSize: Style.font.caption
-                foreground: root.fg
-                accent: root.accentC
-                fontFamily: root.bar.fontFamily
-                bordered: true
-                enabled: !root.txRunning
-                onClicked: {
-                  root.txViewActive = false
-                  root.tab = root.prevTab
-                }
-              }
-              Button {
-                iconText: "\uf00d"
-                tooltipText: "Discard output and close view"
-                foreground: root.fg
-                accent: root.accentC
-                fontFamily: root.bar.fontFamily
-                enabled: !root.txRunning
-                onClicked: {
-                  root.consoleLines = []
-                  root.txLabel = ""
-                  root.txExitCode = -1
-                  root.txViewActive = false
-                  root.tab = root.prevTab
-                }
-              }
-            }
-          }
-
-          Text {
-            textFormat: Text.PlainText
-            visible: root.txRunning && root.consoleLines.length === 0
-            text: "Waiting for output\u2026"
-            color: root.dimColor
-            font.family: root.bar.fontFamily
-            font.pixelSize: Style.font.caption
-          }
-
-          Rectangle {
-            width: parent.width
-            height: Style.space(430)
-            radius: Style.cornerRadius
-            color: Style.hoverFillFor(root.fg, root.accentC)
-            clip: true
-
-            Flickable {
-              id: consoleScroll
-              property bool follow: true
-              anchors.fill: parent
-              anchors.margins: Style.space(6)
-              contentWidth: width
-              contentHeight: consoleText.implicitHeight
-              boundsBehavior: Flickable.StopAtBounds
-              onDragStarted: follow = false
-              onContentHeightChanged: if (follow) scrollToBottom()
-
-              function scrollToBottom() {
-                contentY = Math.max(0, contentHeight - height)
-              }
-
-              Text {
-                textFormat: Text.PlainText
-                id: consoleText
-                width: consoleScroll.width
-                text: root.consoleLines.join("\n")
-                color: root.fg
-                font.family: root.bar.fontFamily
-                font.pixelSize: Style.font.caption
-                wrapMode: Text.WrapAtWordBoundaryOrAnywhere
-              }
-
-              ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
-            }
-          }
-
-          Text {
-            textFormat: Text.PlainText
-            text: root.txRunning
-              ? "The panel stays here until it finishes \u00b7 output streams live \u00b7 Cancel stops the operation"
-              : "Esc or Back to return \u00b7 output kept until you discard it"
-            color: root.dimColor
-            font.family: root.bar.fontFamily
-            font.pixelSize: Style.font.caption
-          }
-        }
-
         // ---------- Footer hints ----------
         Text {
           textFormat: Text.PlainText
-          visible: root.consoleLines.length === 0 && !root.txViewActive
           text: "Esc close \u00b7 r refresh \u00b7 u upgrade \u00b7 1-4 tabs \u00b7 click a package for details"
           color: root.dimColor
           font.family: root.bar.fontFamily
@@ -1187,7 +857,7 @@ Panel {
     onClicked: root.tab = tb.key
   }
 
-  // One pending-update row: source glyph + name + old -> new + tag.
+  // One pending-update row: glyph + name + old -> new.
   component UpdateRow: MouseArea {
     id: urow
     required property var modelData
@@ -1196,8 +866,7 @@ Panel {
     implicitHeight: urowBody.implicitHeight + Style.space(6)
     hoverEnabled: true
     cursorShape: Qt.PointingHandCursor
-    onClicked: root.showDetail(urow.modelData.name,
-      urow.modelData.source === "aur" ? "installed" : root.isInstalled(urow.modelData.name))
+    onClicked: root.showDetail(urow.modelData.name, root.isInstalled(urow.modelData.name))
 
     Rectangle {
       anchors.fill: parent
@@ -1216,8 +885,8 @@ Panel {
 
       Text {
         textFormat: Text.PlainText
-        text: urow.modelData.source === "aur" ? "\uf089a" : "\uf03d3"
-        color: urow.modelData.source === "aur" ? root.aurColor : root.accentC
+        text: "\uf03d3"
+        color: root.accentC
         font.family: root.bar.fontFamily
         font.pixelSize: Style.font.caption
       }
@@ -1239,13 +908,6 @@ Panel {
         font.pixelSize: Style.font.caption
         elide: Text.ElideRight
         Layout.fillWidth: true
-      }
-      Text {
-        textFormat: Text.PlainText
-        text: urow.modelData.source === "aur" ? "AUR" : "package"
-        color: urow.modelData.source === "aur" ? root.aurColor : root.dimColor
-        font.family: root.bar.fontFamily
-        font.pixelSize: Style.font.caption * 0.85
       }
     }
   }
@@ -1302,7 +964,7 @@ Panel {
         Text {
           textFormat: Text.PlainText
           text: srow.modelData.repo
-          color: srow.modelData.aur ? root.aurColor : root.dimColor
+          color: root.dimColor
           font.family: root.bar.fontFamily
           font.pixelSize: Style.font.caption * 0.9
         }
@@ -1329,15 +991,14 @@ Panel {
       foreground: srow.modelData.installed ? root.urgentC : root.fg
       hoverColor: srow.modelData.installed ? root.urgentC : root.fg
       fontFamily: root.bar.fontFamily
-      enabled: !root.txRunning
       onClicked: {
         if (srow.modelData.installed) root.removePkg(srow.modelData.name)
-        else root.installPkg(srow.modelData.name, srow.modelData.aur ? "aur" : "repo")
+        else root.installPkg(srow.modelData.name)
       }
     }
   }
 
-  // One installed-package row: name + version + AUR marker.
+  // One installed-package row: name + version.
   component InstalledRow: MouseArea {
     id: irow
     required property var modelData
@@ -1378,14 +1039,6 @@ Panel {
         color: root.dimColor
         font.family: root.bar.fontFamily
         font.pixelSize: Style.font.caption
-      }
-      Text {
-        textFormat: Text.PlainText
-        visible: irow.modelData.aur
-        text: "AUR"
-        color: root.aurColor
-        font.family: root.bar.fontFamily
-        font.pixelSize: Style.font.caption * 0.85
       }
     }
   }
